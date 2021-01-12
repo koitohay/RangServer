@@ -13,6 +13,10 @@ app.use(express.static(path.join(__dirname, '/../public')));
 // Socket.io
 sio.on('connection', (socket) => {
 
+    sio.on('readFromClient', (data)=>{
+    console.log(data);
+    });
+
     //console.log('client connected');
     rang.initGame(sio, socket);
 
