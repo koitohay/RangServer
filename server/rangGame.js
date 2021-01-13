@@ -21,10 +21,15 @@ const values = [
 var deck = null;
 let players = [];
 let playedCards = [];
-let noOfPlayersPlayedTrick = 0;
+let noOfRoundsWonByPlayers01 = 0;
+let noOfRoundsWonByPlayers02 = 0;
+let noOfRoundsWonByPlayers03 = 0;
+let noOfRoundsWonByPlayers04 = 0;
 let playersTurn = 1;
 let roundStartPlayer = playersTurn;
 let rounds = 0;
+let currentRoundRang = null;
+let currentGameRang = 'clubs';
 /**
  * This function is called by index.js to initialize a new game instance.
  *
@@ -186,6 +191,8 @@ function dealCardsToPlayers(data) {
 
 function playedCard(data) {
 
+    if (currentRoundRang === null)
+        currentRoundRang = data.card.name;
     playedCards.push({ playerData: data, round: rounds });
 
     var playersForRoom = numberOfUsersInRoom(data.roomId);
@@ -255,6 +262,9 @@ function startGame(player) {
 
 function whosTurn(roomId) {
 
+    if (rounds == 13) {
+        endGame();
+    }
     var playersForRoom = numberOfUsersInRoom(roomId);
     playersTurn = playersTurn >= playersForRoom.length ? 1 : playersTurn + 1;
 
@@ -265,8 +275,9 @@ function whosTurn(roomId) {
         playersTurn = winner.playerData.playerId;
         roundStartPlayer = playersTurn;
         rounds = rounds + 1;
+        currentRoundRang = null;
     }
-    
+
     console.log('Whos turn', playersTurn);
 
     nextPlayerTurn = findAPlayerInRoom(roomId, playersTurn);
@@ -276,12 +287,56 @@ function whosTurn(roomId) {
 
 function whoWonTheRound() {
     var cardsPlayedInCurrentRound = getCardsPlayedInRound();
+    console.log("Played cards: ", cardsPlayedInCurrentRound);
 
-    let winner = cardsPlayedInCurrentRound.reduce((a, b) => a.playerData.card.value > b.playerData.card.value ? a : b);
+    var largest = 0;
+    var largestCard = null;
+    var rangUsed = false;
+    for (i = 0; i <= cardsPlayedInCurrentRound.length - 1; i++) {
+        if (cardsPlayedInCurrentRound[i].playerData.card.name === currentRoundRang && !rangUsed) {
+            if (cardsPlayedInCurrentRound[i].playerData.card.value > largest) {
+                largestCard = cardsPlayedInCurrentRound[i];
+                largest = cardsPlayedInCurrentRound[i].playerData.card.value;
+            }
+        }
+        else if (cardsPlayedInCurrentRound[i].playerData.card.name === currentGameRang) {
+            if (rangUsed) {
+                if (cardsPlayedInCurrentRound[i].playerData.card.value > largest) {
+                    largestCard = cardsPlayedInCurrentRound[i];
+                    largest = cardsPlayedInCurrentRound[i].playerData.card.value;
+                }
+            } else {
+                largestCard = cardsPlayedInCurrentRound[i];
+                largest = cardsPlayedInCurrentRound[i].playerData.card.value;
+                rangUsed = true;
+            }
+        }
+    }
 
-    return winner;
+    //TODO: findout who is the winner
+    switch (largestCard.playerData.playerId) {
+        case 1:
+            noOfRoundsWonByPlayers01 = noOfRoundsWonByPlayers01 + 1;
+            break;
+        case 2:
+            noOfRoundsWonByPlayers02 = noOfRoundsWonByPlayers02 + 1;
+            break;
+        case 3:
+            noOfRoundsWonByPlayers03 = noOfRoundsWonByPlayers03 + 1;
+            break;
+        case 4:
+            noOfRoundsWonByPlayers04 = noOfRoundsWonByPlayers04 + 1;
+            break;
+        default:
+            break;
+    }
+    return largestCard;
+    // return cardsPlayedInCurrentRound.reduce((a, b) => a.playerData.card.value > b.playerData.card.value ? a : b);
 }
 
+function endGame() {
+
+}
 
 /* *************************
    *                       *
