@@ -5,6 +5,7 @@ var sio = require('socket.io')(server);
 var path = require('path');
 // Import the Anagrammatix game file.
 var rang = require('./server/rangGame');
+const PORT = process.env.PORT || 4100;
 
 var numClients = 0;
 var users = [{}];
@@ -27,7 +28,7 @@ sio.on('connection', (socket) => {
 
 });
 
-server.listen(4100, () => {
+server.listen(PORT, () => {
     console.log('Listening on :4100');
 });
 
