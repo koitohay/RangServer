@@ -4,7 +4,7 @@ var server = require('http').createServer(app);
 var sio = require('socket.io')(server);
 var path = require('path');
 // Import the Anagrammatix game file.
-var rang = require('./server/ranggame');
+var rang = require('./server/rangGame');
 
 var numClients = 0;
 var users = [{}];
