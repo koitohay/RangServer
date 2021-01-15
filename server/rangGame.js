@@ -1,3 +1,5 @@
+const { reset } = require("nodemon");
+
 var io;
 var gameSocket;
 // declare card elements
@@ -21,12 +23,10 @@ const values = [
 var deck = null;
 let players = [];
 let playedCards = [];
-let noOfRoundsWonByPlayers01 = 0;
-let noOfRoundsWonByPlayers02 = 0;
-let noOfRoundsWonByPlayers03 = 0;
-let noOfRoundsWonByPlayers04 = 0;
+let rangSet = 0;
 let playersTurn = 1;
 let roundStartPlayer = playersTurn;
+let previousRoundWinner = null;
 let rounds = 0;
 let currentRoundRang = null;
 let currentGameRang = 'clubs';
@@ -241,7 +241,22 @@ function Deck() {
         for (var i = number; i > 0; i--) {
             returnCards.push(this.cards.pop());
         }
-        return returnCards;
+        const groupById = (acc, item) => {
+            const id = item.name;
+            if (id in acc) {
+                acc[id].push(item);
+            } else {
+                acc[id] = [item];
+            }
+            return acc;
+        };
+        const sortByNum = (a, b) => a.value - b.value;
+        const sortByMinNum = (a, b) => a[0].value - b[0].value;
+
+        const groups = Object.values(returnCards.reduce(groupById, {}))
+            .map(group => group.sort(sortByNum))
+            .sort(sortByMinNum);
+        return [].concat(...groups);
     }
     this.getCard = function () {
         return this.getCards(1);
@@ -253,39 +268,53 @@ function Deck() {
 
 function startGame(player) {
     console.log('Your turn called', player);
-    rounds = rounds + 1;
+    rounds = 1;
     playersTurn = 1;
     roundStartPlayer = playersTurn;
-    io.to(player.room).emit('yourTurn', { playerId: player.playerId });
+    previousRoundWinner = null;
+    rangSet = 1;
+    io.to(player.room).emit('yourTurn', { playerId: player.playerId, clearCards: false });
 }
-
 
 function whosTurn(roomId) {
 
-    if (rounds == 13) {
-        endGame();
-    }
     var playersForRoom = numberOfUsersInRoom(roomId);
     playersTurn = playersTurn >= playersForRoom.length ? 1 : playersTurn + 1;
 
-
     if (playersTurn == roundStartPlayer) {
-        var winner = whoWonTheRound();
-        io.to(roomId).emit("whoWonRound", winner);
+        var winner = whoWonTheRound(roomId);
+        console.log("Number of rounds: ", rounds);
+        if (rounds == 13) {
+            var gameWinner = playersForRoom.reduce((a, b) => a.roundsWon > b.roundsWon ? a : b);
+            resetGame();
+            io.to(roomId).emit('endGame', { gameWinner: gameWinner });
+            return;
+        }
+        else if ((rounds == 3 && previousRoundWinner !== null && previousRoundWinner.playerData.playerId == winner.playerData.playerId)
+            || (rounds > 3 && previousRoundWinner !== null && previousRoundWinner.playerData.playerId == winner.playerData.playerId)) {
+            rangSet = rangSet + 1;
+            previousRoundWinner = null;
+            io.to(roomId).emit("whoWonRound", { rangSet: rangSet, rounds: rounds, winner: winner, clearCards: true, playerId: winner.playerData.playerId });
+        }
+        else {
+            previousRoundWinner = winner;
+            io.to(roomId).emit('yourTurn', { playerId: winner.playerData.playerId, clearCards: true });
+        }
         playersTurn = winner.playerData.playerId;
         roundStartPlayer = playersTurn;
         rounds = rounds + 1;
         currentRoundRang = null;
     }
+    else {
+        console.log('Whos turn', playersTurn);
 
-    console.log('Whos turn', playersTurn);
+        nextPlayerTurn = findAPlayerInRoom(roomId, playersTurn);
 
-    nextPlayerTurn = findAPlayerInRoom(roomId, playersTurn);
-
-    io.to(nextPlayerTurn.room).emit('yourTurn', { playerId: nextPlayerTurn.playerId });
+        io.to(nextPlayerTurn.room).emit('yourTurn', { playerId: nextPlayerTurn.playerId });
+    }
 }
 
-function whoWonTheRound() {
+function whoWonTheRound(roomId) {
     var cardsPlayedInCurrentRound = getCardsPlayedInRound();
     console.log("Played cards: ", cardsPlayedInCurrentRound);
 
@@ -312,31 +341,14 @@ function whoWonTheRound() {
             }
         }
     }
+    console.log('Player won the round', largestCard);
 
-    //TODO: findout who is the winner
-    switch (largestCard.playerData.playerId) {
-        case 1:
-            noOfRoundsWonByPlayers01 = noOfRoundsWonByPlayers01 + 1;
-            break;
-        case 2:
-            noOfRoundsWonByPlayers02 = noOfRoundsWonByPlayers02 + 1;
-            break;
-        case 3:
-            noOfRoundsWonByPlayers03 = noOfRoundsWonByPlayers03 + 1;
-            break;
-        case 4:
-            noOfRoundsWonByPlayers04 = noOfRoundsWonByPlayers04 + 1;
-            break;
-        default:
-            break;
-    }
+    if (largestCard !== null)
+        updatePlayerRounds(largestCard.playerData.playerId, roomId);
+
     return largestCard;
-    // return cardsPlayedInCurrentRound.reduce((a, b) => a.playerData.card.value > b.playerData.card.value ? a : b);
 }
 
-function endGame() {
-
-}
 
 /* *************************
    *                       *
@@ -344,9 +356,29 @@ function endGame() {
    *                       *
    ************************* */
 
+function resetGame() {
+    rounds = 1;
+    playersTurn = 1;
+    roundStartPlayer = playersTurn;
+    previousRoundWinner = null;
+    rangSet = 1;
+}
+
+function updatePlayerRounds(playerId, roomId) {
+    var players = numberOfUsersInRoom(roomId);
+
+    for (var i in players) {
+        if (players[i].playerId == playerId) {
+            players[i].roundsWon = players[i].roundsWon + 1;
+            console.log('Update player round', players[i].roundsWon);
+
+            break; //Stop this loop, we found it!
+        }
+    }
+}
 
 function createPlayer(data, thisGameId, playerId, socketId, cardDealed, isHost) {
-    return { playerName: data.playerName, room: thisGameId.toString(), playerId: playerId, socketId: socketId, isHost: isHost, cardDealed: cardDealed };
+    return { playerName: data.playerName, room: thisGameId.toString(), playerId: playerId, socketId: socketId, isHost: isHost, cardDealed: cardDealed, roundsWon: 0 };
 }
 
 function numberOfUsersInRoom(roomId) {
