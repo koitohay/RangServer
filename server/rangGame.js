@@ -4,32 +4,13 @@ var io;
 var gameSocket;
 // declare card elements
 const suits = ["spades", "diamonds", "clubs", "hearts"];
-const values = [
-    "A",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9",
-    "10",
-    "J",
-    "Q",
-    "K",
-];
+
 // empty array to contain cards
 var deck = null;
 let players = [];
 let playedCards = [];
 let rangSet = 0;
-let playersTurn = 1;
-let roundStartPlayer = playersTurn;
-let previousRoundWinner = null;
-let rounds = 0;
-let currentRoundRang = null;
-let currentGameRang = 'clubs';
+var rooms = [];
 /**
  * This function is called by index.js to initialize a new game instance.
  *
@@ -158,8 +139,8 @@ function playerJoinGame(data) {/*  */
         players.push(createPlayer(data, data.gameId, playersJoined.length + 1, data.mySocketId, false));
 
         data.players = numberOfUsersInRoom(data.gameId);
-        //console.log('Player ' + data.playerName + ' joining game: ' + data.gameId );
 
+        rooms.push({ roomId: data.gameId.toString(), rounds: 0, currentGameRang: 'clubs', currentRoundRang: null, playersTurn: 0, roundStartPlayer: null, previousRoundWinner: null, nextPlayerTurn: null });
         // Emit an event notifying the clients that the player has joined the room.
         io.to(data.gameId).emit('playerJoinedRoom', data);
         io.to(data.mySocketId).emit('updatePlayerId', { playerId: data.players.length });
@@ -190,12 +171,12 @@ function dealCardsToPlayers(data) {
 }
 
 function playedCard(data) {
+    var room = getRoomForCurrentGame(data.roomId);
+    if (room.currentRoundRang === null)
+        room.currentRoundRang = data.card.name;
+    playedCards.push({ playerData: data, round: room.rounds });
 
-    if (currentRoundRang === null)
-        currentRoundRang = data.card.name;
-    playedCards.push({ playerData: data, round: rounds });
-
-    var playersForRoom = numberOfUsersInRoom(data.roomId);
+    var playersForRoom = numberOfUsersInRoom(room.roomId);
 
     playersForRoom.forEach((player) => {
         if (!data.playerId !== player.playerId) {
@@ -203,7 +184,7 @@ function playedCard(data) {
         }
     });
 
-    whosTurn(data.roomId);
+    whosTurn(room.roomId);
 }
 
 /* *************************
@@ -268,67 +249,73 @@ function Deck() {
 
 function startGame(player) {
     console.log('Your turn called', player);
-    rounds = 1;
-    playersTurn = 1;
-    roundStartPlayer = playersTurn;
-    previousRoundWinner = null;
+
+    var room = getRoomForCurrentGame(player.room);
+    room.rounds = 1;
+    room.playersTurn = 1;
+    room.roundStartPlayer = room.playersTurn;
+    room.previousRoundWinner = null;
     rangSet = 1;
     io.to(player.room).emit('yourTurn', { playerId: player.playerId, clearCards: false });
 }
 
 function whosTurn(roomId) {
-
+    var room = getRoomForCurrentGame(roomId);
     var playersForRoom = numberOfUsersInRoom(roomId);
-    playersTurn = playersTurn >= playersForRoom.length ? 1 : playersTurn + 1;
 
-    if (playersTurn == roundStartPlayer) {
-        var winner = whoWonTheRound(roomId);
-        console.log("Number of rounds: ", rounds);
-        if (rounds == 13) {
+    room.playersTurn = room.playersTurn >= playersForRoom.length ? 1 : room.playersTurn + 1;
+
+    console.log("Who is players turn and startplayer: ", room.playersTurn, room.roundStartPlayer);
+
+    if (room.playersTurn == room.roundStartPlayer) {
+        var winner = whoWonTheRound(room);
+        console.log("Number of rounds: ", room.rounds);
+        if (room.rounds == 13) {
             var gameWinner = playersForRoom.reduce((a, b) => a.roundsWon > b.roundsWon ? a : b);
-            resetGame();
+            resetGame(room);
             io.to(roomId).emit('endGame', { gameWinner: gameWinner });
             return;
         }
-        else if ((rounds == 3 && previousRoundWinner !== null && previousRoundWinner.playerData.playerId == winner.playerData.playerId)
-            || (rounds > 3 && previousRoundWinner !== null && previousRoundWinner.playerData.playerId == winner.playerData.playerId)) {
+        else if ((room.rounds == 3 && room.previousRoundWinner !== null && room.previousRoundWinner.playerData.playerId == winner.playerData.playerId)
+            || (room.rounds > 3 && room.previousRoundWinner !== null && room.previousRoundWinner.playerData.playerId == winner.playerData.playerId)) {
             rangSet = rangSet + 1;
-            previousRoundWinner = null;
-            io.to(roomId).emit("whoWonRound", { rangSet: rangSet, rounds: rounds, winner: winner, clearCards: true, playerId: winner.playerData.playerId });
+            room.previousRoundWinner = null;
+            io.to(roomId).emit("whoWonRound", { rangSet: rangSet, rounds: room.rounds, winner: winner, clearCards: true, playerId: winner.playerData.playerId });
         }
         else {
-            previousRoundWinner = winner;
+            room.previousRoundWinner = winner;
             io.to(roomId).emit('yourTurn', { playerId: winner.playerData.playerId, clearCards: true });
         }
-        playersTurn = winner.playerData.playerId;
-        roundStartPlayer = playersTurn;
-        rounds = rounds + 1;
-        currentRoundRang = null;
+        room.playersTurn = winner.playerData.playerId;
+        room.roundStartPlayer = room.playersTurn;
+        room.rounds = room.rounds + 1;
+        room.currentRoundRang = null;
     }
     else {
-        console.log('Whos turn', playersTurn);
+        console.log('Whos turn', room.playersTurn);
 
-        nextPlayerTurn = findAPlayerInRoom(roomId, playersTurn);
+        room.nextPlayerTurn = findAPlayerInRoom(roomId, room.playersTurn);
 
-        io.to(nextPlayerTurn.room).emit('yourTurn', { playerId: nextPlayerTurn.playerId });
+        io.to(room.nextPlayerTurn.room).emit('yourTurn', { playerId: room.nextPlayerTurn.playerId });
     }
 }
 
-function whoWonTheRound(roomId) {
-    var cardsPlayedInCurrentRound = getCardsPlayedInRound();
-    console.log("Played cards: ", cardsPlayedInCurrentRound);
+function whoWonTheRound(room) {
+    var cardsPlayedInCurrentRound = getCardsPlayedInRound(room.roomId);
 
     var largest = 0;
     var largestCard = null;
     var rangUsed = false;
     for (i = 0; i <= cardsPlayedInCurrentRound.length - 1; i++) {
-        if (cardsPlayedInCurrentRound[i].playerData.card.name === currentRoundRang && !rangUsed) {
+        console.log("Played card and current round rang: ", cardsPlayedInCurrentRound[i].playerData.card.name, room.currentRoundRang);
+
+        if (cardsPlayedInCurrentRound[i].playerData.card.name === room.currentRoundRang && !rangUsed) {
             if (cardsPlayedInCurrentRound[i].playerData.card.value > largest) {
                 largestCard = cardsPlayedInCurrentRound[i];
                 largest = cardsPlayedInCurrentRound[i].playerData.card.value;
             }
         }
-        else if (cardsPlayedInCurrentRound[i].playerData.card.name === currentGameRang) {
+        else if (cardsPlayedInCurrentRound[i].playerData.card.name === room.currentGameRang) {
             if (rangUsed) {
                 if (cardsPlayedInCurrentRound[i].playerData.card.value > largest) {
                     largestCard = cardsPlayedInCurrentRound[i];
@@ -344,7 +331,7 @@ function whoWonTheRound(roomId) {
     console.log('Player won the round', largestCard);
 
     if (largestCard !== null)
-        updatePlayerRounds(largestCard.playerData.playerId, roomId);
+        updatePlayerRounds(largestCard.playerData.playerId, room.roomId);
 
     return largestCard;
 }
@@ -356,11 +343,11 @@ function whoWonTheRound(roomId) {
    *                       *
    ************************* */
 
-function resetGame() {
-    rounds = 1;
-    playersTurn = 1;
-    roundStartPlayer = playersTurn;
-    previousRoundWinner = null;
+function resetGame(room) {
+    room.rounds = 1;
+    room.playersTurn = 1;
+    room.roundStartPlayer = room.playersTurn;
+    room.previousRoundWinner = null;
     rangSet = 1;
 }
 
@@ -385,11 +372,16 @@ function numberOfUsersInRoom(roomId) {
     return players.filter((obj) => obj.room === roomId);
 }
 
+function getRoomForCurrentGame(roomId) {
+    return rooms.find((obj) => obj.roomId === roomId);
+}
+
 function findAPlayerInRoom(roomId, playerId) {
     return players.find((obj) => obj.room === roomId && obj.playerId == playerId);
 }
 
-function getCardsPlayedInRound() {
-    return playedCards.filter((obj) => obj.round === rounds);
+function getCardsPlayedInRound(roomId) {
+    var room = getRoomForCurrentGame(roomId);
+    return playedCards.filter((obj) => obj.round === room.rounds);
 }
 
