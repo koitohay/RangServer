@@ -25,7 +25,6 @@ exports.initGame = function (sio, socket) {
     // Host Events
     gameSocket.on('hostCreateNewGame', hostCreateNewGame);
     gameSocket.on('hostRoomFull', hostPrepareGame);
-    gameSocket.on('hostCountdownFinished', hostStartGame);
     gameSocket.on('hostNextRound', hostNextRound);
 
     // Player Events
@@ -47,7 +46,7 @@ function hostCreateNewGame(data) {
     // Create a unique Socket.IO Room
     var thisGameId = (Math.random() * 100000) | 0;
 
-    players.push(createPlayer(data, thisGameId, 1, this.id, false, true));
+    players.push(createPlayer(data.playerName, thisGameId, 1, this.id, false, true));
 
     // Return the Room ID (gameId) and the socket ID (mySocketId) to the browser client
     this.emit('newGameCreated', { gameId: thisGameId, mySocketId: this.id, isHost: true, players: numberOfUsersInRoom(thisGameId.toString()) });
@@ -74,16 +73,6 @@ function hostPrepareGame(data) {
     //console.log("All Players Present. Preparing game...", data.gameId, players);
     io.to(data.gameId).emit('beginNewGame', data);
 }
-
-/*
- * The Countdown has finished, and the game begins!
- * @param gameId The game ID / room ID
- */
-function hostStartGame(gameId) {
-    console.log('Game Started.');
-    //Shuffle, deal card and give the host player option to select rang and start game.
-    //sendWord(0,gameId);
-};
 
 /**
  * A player answered correctly. Time for the next word.
@@ -136,7 +125,7 @@ function playerJoinGame(data) {/*  */
         // Join the room
         this.join(data.gameId.toString());
 
-        players.push(createPlayer(data, data.gameId, playersJoined.length + 1, data.mySocketId, false));
+        players.push(createPlayer(data.playerName, data.gameId, playersJoined.length + 1, data.mySocketId, false));
 
         data.players = numberOfUsersInRoom(data.gameId);
 
@@ -184,7 +173,7 @@ function playedCard(data) {
         }
     });
 
-    whosTurn(room.roomId);
+    setTimeout(function() {  whosTurn(room, playersForRoom); }, 2000);
 }
 
 /* *************************
@@ -259,32 +248,29 @@ function startGame(player) {
     io.to(player.room).emit('yourTurn', { playerId: player.playerId, clearCards: false });
 }
 
-function whosTurn(roomId) {
-    var room = getRoomForCurrentGame(roomId);
-    var playersForRoom = numberOfUsersInRoom(roomId);
-
+function whosTurn(room, playersForRoom) {
     room.playersTurn = room.playersTurn >= playersForRoom.length ? 1 : room.playersTurn + 1;
 
     console.log("Who is players turn and startplayer: ", room.playersTurn, room.roundStartPlayer);
 
     if (room.playersTurn == room.roundStartPlayer) {
-        var winner = whoWonTheRound(room);
+        var winner = whoWonTheRound(room, playersForRoom);
         console.log("Number of rounds: ", room.rounds);
         if (room.rounds == 13) {
-            var gameWinner = playersForRoom.reduce((a, b) => a.roundsWon > b.roundsWon ? a : b);
+            var gameWinner = whichTeamWonTheGame(room.roomId);
             resetGame(room);
-            io.to(roomId).emit('endGame', { gameWinner: gameWinner });
+            io.to(room.roomId).emit('endGame', { gameWinner: gameWinner });
             return;
         }
         else if ((room.rounds == 3 && room.previousRoundWinner !== null && room.previousRoundWinner.playerData.playerId == winner.playerData.playerId)
             || (room.rounds > 3 && room.previousRoundWinner !== null && room.previousRoundWinner.playerData.playerId == winner.playerData.playerId)) {
             rangSet = rangSet + 1;
             room.previousRoundWinner = null;
-            io.to(roomId).emit("whoWonRound", { rangSet: rangSet, rounds: room.rounds, winner: winner, clearCards: true, playerId: winner.playerData.playerId });
+            io.to(room.roomId).emit("whoWonRound", { rangSet: rangSet, rounds: room.rounds, winner: winner, clearCards: true, playerId: winner.playerData.playerId });
         }
         else {
             room.previousRoundWinner = winner;
-            io.to(roomId).emit('yourTurn', { playerId: winner.playerData.playerId, clearCards: true });
+            io.to(room.roomId).emit('yourTurn', { playerId: winner.playerData.playerId, clearCards: true });
         }
         room.playersTurn = winner.playerData.playerId;
         room.roundStartPlayer = room.playersTurn;
@@ -294,7 +280,7 @@ function whosTurn(roomId) {
     else {
         console.log('Whos turn', room.playersTurn);
 
-        room.nextPlayerTurn = findAPlayerInRoom(roomId, room.playersTurn);
+        room.nextPlayerTurn = findAPlayerInRoom(room.roomId, room.playersTurn);
 
         io.to(room.nextPlayerTurn.room).emit('yourTurn', { playerId: room.nextPlayerTurn.playerId });
     }
@@ -336,6 +322,16 @@ function whoWonTheRound(room) {
     return largestCard;
 }
 
+function whichTeamWonTheGame(roomId) {
+    var player01 = findAPlayerInRoom(roomId, 1);
+    var player02 = findAPlayerInRoom(roomId, 2);
+    var player03 = findAPlayerInRoom(roomId, 3);
+    var player04 = findAPlayerInRoom(roomId, 4);
+
+    return (player01.roundsWon + player03.roundsWon) > (player02.roundsWon + player04.roundsWon)
+        ? { playerNames: player01.playerName + " & " + player03.playerName, roundsWon: player01.roundsWon + player03.roundsWon }
+        : { playerNames: player02.playerName + " & " + player03.playerName, roundsWon: player02.roundsWon + player04.roundsWon };
+}
 
 /* *************************
    *                       *
@@ -352,20 +348,12 @@ function resetGame(room) {
 }
 
 function updatePlayerRounds(playerId, roomId) {
-    var players = numberOfUsersInRoom(roomId);
-
-    for (var i in players) {
-        if (players[i].playerId == playerId) {
-            players[i].roundsWon = players[i].roundsWon + 1;
-            console.log('Update player round', players[i].roundsWon);
-
-            break; //Stop this loop, we found it!
-        }
-    }
+    var player = findAPlayerInRoom(roomId, playerId);
+    player.roundsWon = player.roundsWon + 1;
 }
 
-function createPlayer(data, thisGameId, playerId, socketId, cardDealed, isHost) {
-    return { playerName: data.playerName, room: thisGameId.toString(), playerId: playerId, socketId: socketId, isHost: isHost, cardDealed: cardDealed, roundsWon: 0 };
+function createPlayer(playerName, thisGameId, playerId, socketId, cardDealed, isHost) {
+    return { playerName: playerName, room: thisGameId.toString(), playerId: playerId, socketId: socketId, cardDealed: cardDealed, roundsWon: 0 };
 }
 
 function numberOfUsersInRoom(roomId) {
