@@ -330,7 +330,7 @@ function whichTeamWonTheGame(roomId) {
 
     return (player01.roundsWon + player03.roundsWon) > (player02.roundsWon + player04.roundsWon)
         ? { playerNames: player01.playerName + " & " + player03.playerName, roundsWon: player01.roundsWon + player03.roundsWon }
-        : { playerNames: player02.playerName + " & " + player03.playerName, roundsWon: player02.roundsWon + player04.roundsWon };
+        : { playerNames: player02.playerName + " & " + player04.playerName, roundsWon: player02.roundsWon + player04.roundsWon };
 }
 
 /* *************************
