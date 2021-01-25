@@ -6,24 +6,17 @@ var path = require('path');
 // Import the Anagrammatix game file.
 var rang = require('./ranggame');
 
-var numClients = 0;
-var users = [{}];
 app.use(express.static(path.join(__dirname, '/../public')));
 
 // Socket.io
 sio.on('connection', (socket) => {
 
-    sio.on('readFromClient', (data)=>{
-    console.log(data);
+    sio.on('readFromClient', (data) => {
+        console.log(data);
     });
 
     //console.log('client connected');
     rang.initGame(sio, socket);
-
-    // Disconnect event
-    socket.on('disconnect', function () {
-        console.log('Client disconnected');
-    });
 
 });
 

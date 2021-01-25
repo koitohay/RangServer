@@ -25,13 +25,47 @@ exports.initGame = function (sio, socket) {
     // Host Events
     gameSocket.on('hostCreateNewGame', hostCreateNewGame);
     gameSocket.on('hostRoomFull', hostPrepareGame);
-    gameSocket.on('hostNextRound', hostNextRound);
 
     // Player Events
     gameSocket.on('playerJoinGame', playerJoinGame);
     gameSocket.on('dealCardsToPlayers', dealCardsToPlayers);
     gameSocket.on('playedCard', playedCard);
+    gameSocket.on('getCardForRangSelection', getCardForRangSelection);
+    gameSocket.on('gameEnded', gameEnded);
+
+    // Disconnect event
+    gameSocket.on('disconnect', function () {
+        console.log('Client disconnected');
+        logoutPlayer();
+    });
+
 }
+
+function logoutPlayer() {
+    console.log("Socket Id: ", gameSocket.id);
+
+    var player = players.find((obj) => obj.socketId === gameSocket.id);
+
+    var indexOfplayer = players.indexOf(player);
+    if (indexOfplayer != -1) {
+        players.slice(indexOfplayer, 1);
+        gameEnded({gameId: player.room})
+        console.log("player logged out: ", player);
+    }
+}
+
+function gameEnded(data) {
+    console.log("Game ended called: ", data);
+
+    io.to(data.gameId).emit("gameEnded", { gameId: data.gameId });
+
+    var room = rooms.find((room) => room.roomId === data.gameId);
+
+    var indexOfRoom = rooms.indexOf(room);
+    if (indexOfRoom != -1)
+        rooms.slice(indexOfRoom, 1);
+}
+
 
 /* *******************************
    *                             *
@@ -74,19 +108,6 @@ function hostPrepareGame(data) {
     io.to(data.gameId).emit('beginNewGame', data);
 }
 
-/**
- * A player answered correctly. Time for the next word.
- * @param data Sent from the client. Contains the current round and gameId (room)
- */
-function hostNextRound(data) {
-    if (data.round < wordPool.length) {
-        // clear showed cards and set who is the one to start next round.
-        //sendWord(data.round, data.gameId);
-    } else {
-        // If the current round exceeds the number of maximum rounds, send the 'gameOver' event.
-        io.sockets.in(data.gameId).emit('gameOver', data);
-    }
-}
 
 /* *****************************
    *                           *
@@ -129,7 +150,7 @@ function playerJoinGame(data) {/*  */
 
         data.players = numberOfUsersInRoom(data.gameId);
 
-        rooms.push({ roomId: data.gameId.toString(), rounds: 0, currentGameRang: 'clubs', currentRoundRang: null, playersTurn: 0, roundStartPlayer: null, previousRoundWinner: null, nextPlayerTurn: null });
+        rooms.push({ roomId: data.gameId.toString(), rounds: 0, currentGameRang: 'clubs', currentRoundRang: null, playersTurn: 0, roundStartPlayer: null, previousRoundWinner: null, nextPlayerTurn: null, selectionOfRangStarted: null });
         // Emit an event notifying the clients that the player has joined the room.
         io.to(data.gameId).emit('playerJoinedRoom', data);
         io.to(data.mySocketId).emit('updatePlayerId', { playerId: data.players.length });
@@ -145,14 +166,50 @@ function playerJoinGame(data) {/*  */
     }
 }
 
+function startGame(player) {
+    console.log('Your turn called', player);
+
+    var room = getRoomForCurrentGame(player.room);
+    room.rounds = 1;
+    room.playersTurn = 1;
+    room.roundStartPlayer = room.playersTurn;
+    room.previousRoundWinner = null;
+    room.selectionOfRangStarted = null;
+    rangSet = 1;
+    io.to(player.room).emit('yourTurn', { playerId: player.playerId, clearCards: false });
+}
+
+function getCardForRangSelection(data) {
+    var room = getRoomForCurrentGame(data.roomId);
+    if (room.selectionOfRangStarted == null) {
+        room.selectionOfRangStarted = true;
+        var playersForRoom = numberOfUsersInRoom(data.roomId);
+        var firstPlayer = playersForRoom.find((player) => player.playerId == 1);
+        var firstFiveCards = deck.getCards(5);
+        console.log("first five cards:", firstFiveCards);
+        io.to(firstPlayer.socketId).emit('selectRangForGame', { socketId: firstPlayer.socketId, cards: firstFiveCards });
+    }
+}
 
 function dealCardsToPlayers(data) {
     var playersForRoom = numberOfUsersInRoom(data.roomId);
+    var room = getRoomForCurrentGame(data.roomId);
+
+    room.currentGameRang = data.selectedRang.name;
+    io.to(room.roomId).emit('rangSelected', { rang: room.currentGameRang });
 
     playersForRoom.forEach((player) => {
         if (!player.cardDealed) {
-            io.to(player.socketId).emit('cardDealForPlayers', { socketId: player.socketId, cards: deck.getCards(13) });
-            player.cardDealed = true;
+            if (player.playerId == 1) {
+                var firstFiveCards = data.selectedCards;
+                console.log(firstFiveCards);
+                var restofTheCardsForPlayer = deck.getCards(8);
+                io.to(player.socketId).emit('cardDealForPlayers', { socketId: player.socketId, cards: firstFiveCards.concat(restofTheCardsForPlayer) });
+            }
+            else {
+                io.to(player.socketId).emit('cardDealForPlayers', { socketId: player.socketId, cards: deck.getCards(13) });
+                player.cardDealed = true;
+            }
         }
     });
 
@@ -173,7 +230,7 @@ function playedCard(data) {
         }
     });
 
-    setTimeout(function() {  whosTurn(room, playersForRoom); }, 2000);
+    setTimeout(function () { whosTurn(room, playersForRoom); }, 2000);
 }
 
 /* *************************
@@ -205,12 +262,7 @@ function Deck() {
             });
         }
     }
-    this.getCards = function (number) {
-        if (typeof number === 'undefined') number = 1;
-        var returnCards = [];
-        for (var i = number; i > 0; i--) {
-            returnCards.push(this.cards.pop());
-        }
+    this.sort = function (returnCards) {
         const groupById = (acc, item) => {
             const id = item.name;
             if (id in acc) {
@@ -228,6 +280,14 @@ function Deck() {
             .sort(sortByMinNum);
         return [].concat(...groups);
     }
+    this.getCards = function (number) {
+        if (typeof number === 'undefined') number = 1;
+        var returnCards = [];
+        for (var i = number; i > 0; i--) {
+            returnCards.push(this.cards.pop());
+        }
+        return this.sort(returnCards);
+    }
     this.getCard = function () {
         return this.getCards(1);
     }
@@ -236,17 +296,6 @@ function Deck() {
 }
 
 
-function startGame(player) {
-    console.log('Your turn called', player);
-
-    var room = getRoomForCurrentGame(player.room);
-    room.rounds = 1;
-    room.playersTurn = 1;
-    room.roundStartPlayer = room.playersTurn;
-    room.previousRoundWinner = null;
-    rangSet = 1;
-    io.to(player.room).emit('yourTurn', { playerId: player.playerId, clearCards: false });
-}
 
 function whosTurn(room, playersForRoom) {
     room.playersTurn = room.playersTurn >= playersForRoom.length ? 1 : room.playersTurn + 1;
