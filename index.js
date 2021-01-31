@@ -18,7 +18,6 @@ sio.on('connection', (socket) => {
     console.log(data);
     });
 
-    //console.log('client connected');
     rang.initGame(sio, socket);
 
     // Disconnect event

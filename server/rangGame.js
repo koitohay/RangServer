@@ -187,7 +187,7 @@ function getCardForRangSelection(data) {
         var firstPlayer = playersForRoom.find((player) => player.playerId == 1);
         var firstFiveCards = deck.getCards(5);
         console.log("first five cards:", firstFiveCards);
-        io.to(firstPlayer.socketId).emit('selectRangForGame', { socketId: firstPlayer.socketId, cards: firstFiveCards });
+        io.to(firstPlayer.socketId).emit('selectRangForGame', { socketId: firstPlayer.socketId, cards: firstFiveCards});
     }
 }
 
@@ -202,9 +202,8 @@ function dealCardsToPlayers(data) {
         if (!player.cardDealed) {
             if (player.playerId == 1) {
                 var firstFiveCards = data.selectedCards;
-                console.log(firstFiveCards);
                 var restofTheCardsForPlayer = deck.getCards(8);
-                io.to(player.socketId).emit('cardDealForPlayers', { socketId: player.socketId, cards: firstFiveCards.concat(restofTheCardsForPlayer) });
+                io.to(player.socketId).emit('cardDealForPlayers', { socketId: player.socketId, cards: deck.sort(firstFiveCards.concat(restofTheCardsForPlayer)) });
             }
             else {
                 io.to(player.socketId).emit('cardDealForPlayers', { socketId: player.socketId, cards: deck.getCards(13) });
